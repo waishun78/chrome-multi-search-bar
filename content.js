@@ -220,12 +220,16 @@
 
     /* ── Per-bar navigation ── */
     .msb-nav {
-      /* Always in layout — fixed width so the input never jumps */
+      /*
+       * Always in layout with a fixed width so the input never shifts.
+       * Max count string is "99+/100+" (8 chars @ ~5.5px each ≈ 44px)
+       * plus two 16px buttons = 76px total. No gap — flush layout.
+       */
       display: flex;
       align-items: center;
-      gap: 1px;
+      gap: 0;
       flex-shrink: 0;
-      width: 68px;
+      width: 76px;
       visibility: hidden;
       opacity: 0;
       transition: opacity 0.15s ease;
@@ -240,16 +244,17 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 18px;
+      width: 16px;
       height: 18px;
       padding: 0;
       border: none;
       background: none;
       cursor: pointer;
       color: rgba(55, 53, 47, 0.38);
-      font-size: 10px;
+      font-size: 9px;
       border-radius: 3px;
       transition: background 0.1s, color 0.1s;
+      flex-shrink: 0;
     }
 
     .msb-nav-btn:hover {
@@ -258,15 +263,17 @@
     }
 
     .msb-count {
-      font-size: 11px;
+      /* Fixed width sized to the longest possible string: "99+/100+" */
+      width: 44px;
+      font-size: 10.5px;
       color: rgba(55, 53, 47, 0.45);
-      width: 30px;        /* fixed — prevents buttons shifting on count change */
       text-align: center;
       font-variant-numeric: tabular-nums;
-      letter-spacing: -0.01em;
+      letter-spacing: -0.02em;
       user-select: none;
       overflow: hidden;
       white-space: nowrap;
+      flex-shrink: 0;
     }
 
     /* ── Remove button ── */
@@ -392,6 +399,32 @@
   }
 
   // ── Counter + navigation ───────────────────────────────────────────────────
+  const COUNT_CAP = 99;
+
+  function fmtCount(n) {
+    return n > COUNT_CAP ? `${COUNT_CAP}+` : String(n);
+  }
+
+  function fmtTotal(n) {
+    return n > COUNT_CAP ? '100+' : String(n);
+  }
+
+  function selectMark(mark) {
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(mark);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    } catch (_) {}
+  }
+
+  function activateMark(mark) {
+    mark.setAttribute('data-msb-current', '');
+    mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    selectMark(mark);
+  }
+
   function updateCounter(bar) {
     const marks = getMarksForBar(bar.id);
     const total = marks.length;
@@ -401,7 +434,6 @@
     const nav = row.querySelector('.msb-nav');
     const countEl = row.querySelector('.msb-count');
 
-    // Clear current-mark styling from all marks for this bar
     marks.forEach((m) => m.removeAttribute('data-msb-current'));
 
     if (!bar.pattern || total === 0) {
@@ -410,42 +442,31 @@
     }
 
     bar.matchIndex = Math.min(bar.matchIndex, total - 1);
-    countEl.textContent = `${bar.matchIndex + 1}/${total}`;
+    countEl.textContent = `${fmtCount(bar.matchIndex + 1)}/${fmtTotal(total)}`;
     nav.classList.add('visible');
 
-    // Style the active match
-    marks[bar.matchIndex].setAttribute('data-msb-current', '');
+    activateMark(marks[bar.matchIndex]);
   }
 
   function navigateBar(bar, direction) {
     const marks = getMarksForBar(bar.id);
     if (!marks.length) return;
 
-    // Remove old current
     marks[bar.matchIndex]?.removeAttribute('data-msb-current');
 
     bar.matchIndex = (bar.matchIndex + direction + marks.length) % marks.length;
 
-    // Apply new current
-    marks[bar.matchIndex].setAttribute('data-msb-current', '');
-
-    // Update counter text
     const row = shadow?.querySelector(`[data-bar-id="${bar.id}"]`);
-    if (row) row.querySelector('.msb-count').textContent = `${bar.matchIndex + 1}/${marks.length}`;
+    if (row) {
+      row.querySelector('.msb-count').textContent =
+        `${fmtCount(bar.matchIndex + 1)}/${fmtTotal(marks.length)}`;
+    }
 
-    marks[bar.matchIndex].scrollIntoView({ block: 'center', behavior: 'smooth' });
+    activateMark(marks[bar.matchIndex]);
   }
 
   function runSearch() {
     clearHighlights();
-
-    // Track which bar's input is focused so we scroll to its first match
-    const focusedInput = shadow?.querySelector('.msb-input:focus');
-    const focusedBarId = focusedInput
-      ? Number(focusedInput.closest('.msb-row')?.dataset.barId)
-      : null;
-
-    let scrollTarget = null;
 
     bars.forEach((bar, idx) => {
       bar.matchIndex = 0;
@@ -454,20 +475,7 @@
       if (inputEl) inputEl.classList.toggle('input-error', !ok);
       updateCounter(bar);
 
-      if (bar.pattern) {
-        const marks = getMarksForBar(bar.id);
-        if (marks.length > 0) {
-          // Prefer the focused bar; fall back to first bar with matches
-          if (scrollTarget === null || bar.id === focusedBarId) {
-            scrollTarget = marks[0];
-          }
-        }
-      }
     });
-
-    if (scrollTarget) {
-      scrollTarget.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
   }
 
   function scheduleSearch() {
