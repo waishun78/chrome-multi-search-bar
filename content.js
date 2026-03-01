@@ -2,7 +2,7 @@
   'use strict';
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let bars = [{ id: 0, pattern: '', isRegex: false }];
+  let bars = [{ id: 0, pattern: '', isRegex: false, isCaseSensitive: false }];
   let nextId = 1;
   const COLORS = [
     '#FFEB3B', '#67e8f9', '#86efac', '#f9a8d4',
@@ -18,7 +18,7 @@
   // ── Debounce ───────────────────────────────────────────────────────────────
   let debounceTimer = null;
 
-  // ── Styles (inline so they apply synchronously — no async <link> race) ────
+  // ── Styles ─────────────────────────────────────────────────────────────────
   const MSB_CSS = `
     *, *::before, *::after {
       box-sizing: border-box;
@@ -35,9 +35,10 @@
       background: #ffffff;
       border-radius: 6px;
       border: 1px solid rgba(55, 53, 47, 0.14);
-      box-shadow: rgba(15, 15, 15, 0.05) 0px 0px 0px 1px,
-                  rgba(15, 15, 15, 0.1) 0px 3px 6px,
-                  rgba(15, 15, 15, 0.2) 0px 9px 24px;
+      box-shadow:
+        rgba(15, 15, 15, 0.05) 0px 0px 0px 1px,
+        rgba(15, 15, 15, 0.1) 0px 3px 6px,
+        rgba(15, 15, 15, 0.2) 0px 9px 24px;
       font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont,
                    'Segoe UI', Helvetica, Arial, sans-serif;
       font-size: 14px;
@@ -45,16 +46,19 @@
       display: flex;
       flex-direction: column;
       overflow: hidden;
+      will-change: opacity, transform;
       opacity: 1;
       transform: scale(1) translateY(0);
       transform-origin: top right;
-      transition: opacity 0.12s ease, transform 0.12s ease;
+      transition: opacity 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+                  transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
     }
 
     #msb-panel.msb-hidden {
       opacity: 0;
-      transform: scale(0.96) translateY(-6px);
+      transform: scale(0.95) translateY(-8px);
       pointer-events: none;
+      transition: opacity 0.1s ease, transform 0.1s ease;
     }
 
     /* ── Header ── */
@@ -62,7 +66,7 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 10px 8px 12px;
+      padding: 8px 8px 8px 12px;
       border-bottom: 1px solid rgba(55, 53, 47, 0.09);
       flex-shrink: 0;
     }
@@ -74,28 +78,44 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       user-select: none;
+      flex: 1;
     }
 
-    #msb-close {
+    #msb-header-actions {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+    }
+
+    .msb-icon-btn {
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 22px;
-      height: 22px;
+      width: 24px;
+      height: 24px;
       border: none;
       background: none;
       cursor: pointer;
       color: rgba(55, 53, 47, 0.4);
-      font-size: 17px;
-      line-height: 1;
       border-radius: 4px;
       transition: background 0.1s, color 0.1s;
       flex-shrink: 0;
     }
 
-    #msb-close:hover {
+    .msb-icon-btn:hover {
       background: rgba(55, 53, 47, 0.08);
       color: rgb(55, 53, 47);
+    }
+
+    #msb-add-btn {
+      font-size: 20px;
+      line-height: 1;
+      padding-bottom: 1px;
+    }
+
+    #msb-close {
+      font-size: 18px;
+      line-height: 1;
     }
 
     /* ── Bars ── */
@@ -104,7 +124,7 @@
       flex-direction: column;
       gap: 2px;
       padding: 6px;
-      max-height: calc(60vh - 84px);
+      max-height: calc(60vh - 52px);
       overflow-y: auto;
     }
 
@@ -117,12 +137,21 @@
       border-radius: 2px;
     }
 
+    @keyframes msb-row-in {
+      from { opacity: 0; transform: translateY(-5px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
     .msb-row {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 4px;
       padding: 3px 4px;
       border-radius: 4px;
+    }
+
+    .msb-row.msb-row-new {
+      animation: msb-row-in 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
     }
 
     .msb-dot {
@@ -131,6 +160,7 @@
       border-radius: 50%;
       flex-shrink: 0;
       border: 1.5px solid rgba(0, 0, 0, 0.12);
+      transition: background 0.2s ease;
     }
 
     .msb-input {
@@ -144,7 +174,7 @@
       color: rgb(55, 53, 47);
       background: #fff;
       outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s;
+      transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
 
     .msb-input::placeholder {
@@ -161,7 +191,8 @@
       box-shadow: 0 0 0 2px rgba(235, 87, 87, 0.15);
     }
 
-    .msb-regex-btn {
+    /* shared pill-button style for regex + case toggles */
+    .msb-toggle-btn {
       flex-shrink: 0;
       display: flex;
       align-items: center;
@@ -171,23 +202,33 @@
       border: 1px solid rgba(55, 53, 47, 0.16);
       border-radius: 4px;
       background: none;
-      color: rgba(55, 53, 47, 0.4);
-      font-size: 10.5px;
-      font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+      color: rgba(55, 53, 47, 0.38);
       cursor: pointer;
       transition: background 0.1s, border-color 0.1s, color 0.1s;
+      line-height: 1;
     }
 
-    .msb-regex-btn:hover {
+    .msb-toggle-btn:hover {
       background: rgba(55, 53, 47, 0.06);
       border-color: rgba(55, 53, 47, 0.28);
       color: rgb(55, 53, 47);
     }
 
-    .msb-regex-btn.regex-active {
+    .msb-toggle-btn.active {
       background: rgba(35, 131, 226, 0.1);
       border-color: rgba(35, 131, 226, 0.45);
       color: rgb(35, 131, 226);
+    }
+
+    .msb-regex-btn {
+      font-size: 10.5px;
+      font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
+    }
+
+    .msb-case-btn {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
     }
 
     .msb-remove-btn {
@@ -200,7 +241,7 @@
       border: none;
       background: none;
       cursor: pointer;
-      color: rgba(55, 53, 47, 0.28);
+      color: rgba(55, 53, 47, 0.25);
       font-size: 16px;
       line-height: 1;
       border-radius: 4px;
@@ -210,46 +251,6 @@
     .msb-remove-btn:hover {
       background: rgba(235, 87, 87, 0.1);
       color: rgb(235, 87, 87);
-    }
-
-    /* ── Footer ── */
-    #msb-footer {
-      border-top: 1px solid rgba(55, 53, 47, 0.07);
-      padding: 4px 6px 6px;
-      flex-shrink: 0;
-    }
-
-    #msb-add-btn {
-      display: flex;
-      align-items: center;
-      gap: 5px;
-      width: 100%;
-      padding: 5px 6px;
-      border: none;
-      border-radius: 4px;
-      background: none;
-      color: rgba(55, 53, 47, 0.4);
-      font-size: 13px;
-      font-family: inherit;
-      cursor: pointer;
-      text-align: left;
-      transition: background 0.1s, color 0.1s;
-    }
-
-    #msb-add-btn:hover {
-      background: rgba(55, 53, 47, 0.06);
-      color: rgb(55, 53, 47);
-    }
-
-    #msb-add-icon {
-      font-size: 16px;
-      line-height: 1;
-      color: rgba(55, 53, 47, 0.35);
-      transition: color 0.1s;
-    }
-
-    #msb-add-btn:hover #msb-add-icon {
-      color: rgb(55, 53, 47);
     }
   `;
 
@@ -282,7 +283,8 @@
     let re;
     try {
       const source = bar.isRegex ? bar.pattern : escapeRegex(bar.pattern);
-      re = new RegExp(source, 'gi');
+      const flags = bar.isCaseSensitive ? 'g' : 'gi';
+      re = new RegExp(source, flags);
     } catch (_) {
       return false;
     }
@@ -361,13 +363,13 @@
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  function renderBars() {
+  function renderBars(newBarId = null) {
     barsContainer.innerHTML = '';
 
     bars.forEach((bar, idx) => {
       const color = colorForIndex(idx);
       const row = document.createElement('div');
-      row.className = 'msb-row';
+      row.className = 'msb-row' + (bar.id === newBarId ? ' msb-row-new' : '');
       row.dataset.barId = bar.id;
 
       const dot = document.createElement('span');
@@ -388,12 +390,22 @@
       });
 
       const regexBtn = document.createElement('button');
-      regexBtn.className = 'msb-regex-btn' + (bar.isRegex ? ' regex-active' : '');
+      regexBtn.className = 'msb-toggle-btn msb-regex-btn' + (bar.isRegex ? ' active' : '');
       regexBtn.title = 'Toggle regex mode';
       regexBtn.textContent = '.*';
       regexBtn.addEventListener('click', () => {
         bar.isRegex = !bar.isRegex;
-        regexBtn.classList.toggle('regex-active', bar.isRegex);
+        regexBtn.classList.toggle('active', bar.isRegex);
+        runSearch();
+      });
+
+      const caseBtn = document.createElement('button');
+      caseBtn.className = 'msb-toggle-btn msb-case-btn' + (bar.isCaseSensitive ? ' active' : '');
+      caseBtn.title = 'Toggle case sensitive';
+      caseBtn.textContent = 'Aa';
+      caseBtn.addEventListener('click', () => {
+        bar.isCaseSensitive = !bar.isCaseSensitive;
+        caseBtn.classList.toggle('active', bar.isCaseSensitive);
         runSearch();
       });
 
@@ -412,6 +424,7 @@
       row.appendChild(dot);
       row.appendChild(input);
       row.appendChild(regexBtn);
+      row.appendChild(caseBtn);
       row.appendChild(removeBtn);
       barsContainer.appendChild(row);
     });
@@ -425,7 +438,6 @@
 
     shadow = hostEl.attachShadow({ mode: 'open' });
 
-    // Inline styles — avoids async <link> loading race that breaks fixed positioning
     const style = document.createElement('style');
     style.textContent = MSB_CSS;
     shadow.appendChild(style);
@@ -441,38 +453,41 @@
     title.id = 'msb-title';
     title.textContent = 'Search';
 
-    const closeBtn = document.createElement('button');
-    closeBtn.id = 'msb-close';
-    closeBtn.title = 'Close (Esc)';
-    closeBtn.textContent = '×';
-    closeBtn.addEventListener('click', closePanel);
-
-    header.appendChild(title);
-    header.appendChild(closeBtn);
-
-    // Bars
-    barsContainer = document.createElement('div');
-    barsContainer.id = 'msb-bars';
-
-    // Footer
-    const footer = document.createElement('div');
-    footer.id = 'msb-footer';
+    const headerActions = document.createElement('div');
+    headerActions.id = 'msb-header-actions';
 
     const addBtn = document.createElement('button');
     addBtn.id = 'msb-add-btn';
-    addBtn.innerHTML = '<span id="msb-add-icon">+</span> Add search bar';
+    addBtn.className = 'msb-icon-btn';
+    addBtn.title = 'Add search bar';
+    addBtn.textContent = '+';
     addBtn.addEventListener('click', () => {
-      bars.push({ id: nextId++, pattern: '', isRegex: false });
-      renderBars();
+      const id = nextId++;
+      bars.push({ id, pattern: '', isRegex: false, isCaseSensitive: false });
+      renderBars(id);
       const inputs = shadow.querySelectorAll('.msb-input');
       if (inputs.length) inputs[inputs.length - 1].focus();
       runSearch();
     });
 
-    footer.appendChild(addBtn);
+    const closeBtn = document.createElement('button');
+    closeBtn.id = 'msb-close';
+    closeBtn.className = 'msb-icon-btn';
+    closeBtn.title = 'Close (Esc)';
+    closeBtn.textContent = '×';
+    closeBtn.addEventListener('click', closePanel);
+
+    headerActions.appendChild(addBtn);
+    headerActions.appendChild(closeBtn);
+    header.appendChild(title);
+    header.appendChild(headerActions);
+
+    // Bars
+    barsContainer = document.createElement('div');
+    barsContainer.id = 'msb-bars';
+
     panel.appendChild(header);
     panel.appendChild(barsContainer);
-    panel.appendChild(footer);
     shadow.appendChild(panel);
 
     document.addEventListener('keydown', (e) => {
