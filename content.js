@@ -779,23 +779,44 @@
     panel.appendChild(barsContainer);
     shadow.appendChild(panel);
 
-    // Stop all keystrokes inside the panel from leaking to page-level shortcuts
-    // (e.g. sites that bind "/" or "f" on document). Events still propagate
-    // normally within the shadow DOM so Enter navigation below still works.
-    shadow.addEventListener('keydown', (e) => e.stopPropagation());
+    // Intercept keystrokes at the window CAPTURE phase — the very first step of
+    // event dispatch — so we beat even site shortcuts registered with {capture:true}
+    // on document. Shadow-root bubbling listeners fire too late for those.
+    //
+    // When a key is pressed inside our shadow DOM the event's target is retargeted
+    // to hostEl at the window level (shadow DOM encapsulation), so e.target===hostEl
+    // reliably identifies events that originated from our panel.
+    //
+    // stopPropagation() here prevents JS handlers further down the path from seeing
+    // the event, but does NOT prevent the browser's native text-insertion into the
+    // focused <input> — that happens outside the JS event system.
+    window.addEventListener('keydown', (e) => {
+      if (!panel || panel.classList.contains('msb-hidden')) return;
+      if (e.target !== hostEl) return; // event didn't come from inside our panel
 
-    // Enter / Shift+Enter to navigate within the focused bar
-    shadow.addEventListener('keydown', (e) => {
-      if (e.key !== 'Enter') return;
-      const row = e.target.closest('.msb-row');
-      if (!row) return;
-      const barId = Number(row.dataset.barId);
-      const bar = bars.find((b) => b.id === barId);
-      if (!bar) return;
-      e.preventDefault();
-      navigateBar(bar, e.shiftKey ? -1 : 1);
-    });
+      if (e.key === 'Escape') {
+        closePanel();
+        e.stopPropagation();
+        return;
+      }
 
+      if (e.key === 'Enter') {
+        // shadow.activeElement gives the real focused element inside the closed shadow.
+        const row = shadow.activeElement?.closest?.('.msb-row');
+        if (row) {
+          const barId = Number(row.dataset.barId);
+          const bar = bars.find((b) => b.id === barId);
+          if (bar) {
+            e.preventDefault();
+            navigateBar(bar, e.shiftKey ? -1 : 1);
+          }
+        }
+      }
+
+      e.stopPropagation();
+    }, { capture: true });
+
+    // Also close on Escape when focus is outside the panel (e.g. user clicked page).
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && panel && !panel.classList.contains('msb-hidden')) {
         closePanel();
