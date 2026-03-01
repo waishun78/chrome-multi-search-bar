@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Multi-Search Bar",
+  "version": "1.0",
+  "description": "Highlight multiple search terms on any page with distinct colors.",
+  "permissions": ["activeTab", "scripting"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {},
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
