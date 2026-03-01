@@ -376,6 +376,9 @@
 
       const input = document.createElement('input');
       input.type = 'text';
+      input.id = `msb-input-${bar.id}`;
+      input.name = `msb-input-${bar.id}`;
+      input.autocomplete = 'off';
       input.className = 'msb-input';
       input.placeholder = 'Search…';
       input.value = bar.pattern;
