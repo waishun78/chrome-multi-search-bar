@@ -14,6 +14,10 @@
   let shadow = null;
   let panel = null;
   let barsContainer = null;
+  // Map<barId, mark[]> of lead-fragment marks built during each highlight pass.
+  // Avoids repeated full-document querySelectorAll calls for navigation/counters.
+  // Set to null when stale (cleared by clearHighlights, rebuilt by highlightAll).
+  let markCache = null;
 
   // ── Debounce ───────────────────────────────────────────────────────────────
   let debounceTimer = null;
@@ -304,19 +308,25 @@
     return COLORS[bar.id % COLORS.length];
   }
 
-  // Only the first fragment of a cross-inline-element match counts for navigation.
+  // Returns lead-fragment marks for a bar from the cache built by highlightAll.
+  // Falls back to a live DOM query only if the cache is unavailable.
   function getMarksForBar(barId) {
-    return Array.from(document.querySelectorAll(`mark[data-msb="${barId}"]:not([data-msb-cont])`));
+    return markCache?.get(barId) ?? [];
   }
 
   // ── Highlight engine ───────────────────────────────────────────────────────
   function clearHighlights() {
+    markCache = null;
+    // Collect unique parents first; normalize each exactly once after all
+    // replacements rather than after every individual mark (O(parents) not O(marks)).
+    const parents = new Set();
     document.querySelectorAll('mark[data-msb]').forEach((mark) => {
       const parent = mark.parentNode;
       if (!parent) return;
       parent.replaceChild(document.createTextNode(mark.textContent), mark);
-      parent.normalize();
+      parents.add(parent);
     });
+    parents.forEach((p) => p.normalize());
   }
 
   const SKIP_TAGS = new Set([
@@ -350,6 +360,11 @@
     mark.style.borderRadius = '2px';
     mark.style.padding = '0 1px';
     mark.textContent = text;
+    // Register lead fragments in markCache so getMarksForBar() needs no DOM query.
+    if (!isCont) {
+      if (!markCache.has(bar.id)) markCache.set(bar.id, []);
+      markCache.get(bar.id).push(mark);
+    }
     return mark;
   }
 
@@ -381,6 +396,11 @@
     }).filter(Boolean);
 
     if (!entries.length) return;
+
+    // Fresh cache for this pass; makeMarkEl populates it for every lead fragment.
+    markCache = new Map();
+    // Precompute bar priority once — avoids O(n) indexOf inside the sort comparator.
+    const barOrder = new Map(bars.map((b, i) => [b, i]));
 
     const walker = document.createTreeWalker(
       document.body,
@@ -421,51 +441,62 @@
     });
 
     groups.forEach((nodes) => {
-      // Build virtual concatenated string and a segment map for position lookups.
+      // Build virtual string with O(n) join rather than O(n²) concatenation.
       const segments = [];
-      let virtualStr = '';
+      let offset = 0;
       nodes.forEach((node) => {
-        segments.push({ node, start: virtualStr.length, end: virtualStr.length + node.nodeValue.length });
-        virtualStr += node.nodeValue;
+        const len = node.nodeValue.length;
+        segments.push({ node, start: offset, end: offset + len });
+        offset += len;
       });
+      const virtualStr = nodes.map((n) => n.nodeValue).join('');
 
-      // Find all matches from all bars against the virtual string.
+      // Collect matches from all bars; cap total to bound memory and limit how
+      // long a catastrophic regex (e.g. (a+)+) can monopolise the main thread.
       const allMatches = [];
-      entries.forEach(({ bar, re }) => {
+      for (const { bar, re } of entries) {
+        if (allMatches.length >= MAX_MATCHES_PER_GROUP) break;
         re.lastIndex = 0;
         let m;
         while ((m = re.exec(virtualStr)) !== null) {
           allMatches.push({ start: m.index, end: m.index + m[0].length, bar });
           if (m[0].length === 0) re.lastIndex++;
+          if (allMatches.length >= MAX_MATCHES_PER_GROUP) break;
         }
-      });
+      }
 
       if (!allMatches.length) return;
 
       // Sort and resolve overlaps (earlier start wins; ties go to earlier bar).
-      allMatches.sort((a, b) => a.start - b.start || bars.indexOf(a.bar) - bars.indexOf(b.bar));
+      allMatches.sort((a, b) => a.start - b.start || barOrder.get(a.bar) - barOrder.get(b.bar));
       const kept = [];
       let cursor = 0;
       for (const m of allMatches) {
         if (m.start >= cursor) { kept.push(m); cursor = m.end; }
       }
 
-      // Map each kept match back to per-text-node intervals.
+      // Map matches to per-text-node intervals using a two-pointer scan.
+      // Both kept[] and segments[] are sorted by start; matches don't overlap,
+      // so the segment pointer only ever advances — O(kept + segments) total.
       const nodeIntervals = new Map(nodes.map((node) => [node, []]));
+      let segPtr = 0;
       kept.forEach(({ start, end, bar }) => {
+        while (segPtr < segments.length && segments[segPtr].end <= start) segPtr++;
         let isFirst = true;
-        segments.forEach(({ node, start: segStart, end: segEnd }) => {
+        for (let i = segPtr; i < segments.length && segments[i].start < end; i++) {
+          const { node, start: segStart, end: segEnd } = segments[i];
           const oStart = Math.max(start, segStart);
           const oEnd   = Math.min(end, segEnd);
-          if (oStart >= oEnd) return;
-          nodeIntervals.get(node).push({
-            start: oStart - segStart,
-            end:   oEnd   - segStart,
-            bar,
-            isCont: !isFirst,
-          });
-          isFirst = false;
-        });
+          if (oStart < oEnd) {
+            nodeIntervals.get(node).push({
+              start: oStart - segStart,
+              end:   oEnd   - segStart,
+              bar,
+              isCont: !isFirst,
+            });
+            isFirst = false;
+          }
+        }
       });
 
       // Apply intervals to each text node (replace with fragment).
@@ -483,13 +514,19 @@
           pos = end;
         });
         if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
-        node.parentNode.replaceChild(frag, node);
+        // Guard against the node being detached by a page mutation between
+        // TreeWalker collection and this point (common on SPA pages).
+        if (node.parentNode) node.parentNode.replaceChild(frag, node);
       });
     });
   }
 
   // ── Counter + navigation ───────────────────────────────────────────────────
   const COUNT_CAP = 99;
+  // Cap total regex matches collected per block group. Broad patterns like \w+
+  // on a very large page can produce tens of thousands of matches; this bounds
+  // memory use and limits how long a poorly-written regex can run.
+  const MAX_MATCHES_PER_GROUP = 5000;
 
   function fmtCount(n) {
     return n > COUNT_CAP ? `${COUNT_CAP}+` : String(n);
@@ -688,7 +725,7 @@
       'filter:brightness(0.82) saturate(1.3)!important}';
     document.head.appendChild(markStyle);
 
-    shadow = hostEl.attachShadow({ mode: 'open' });
+    shadow = hostEl.attachShadow({ mode: 'closed' });
 
     const style = document.createElement('style');
     style.textContent = MSB_CSS;
@@ -781,7 +818,9 @@
   }
 
   // ── Message listener ───────────────────────────────────────────────────────
-  chrome.runtime.onMessage.addListener((msg) => {
+  chrome.runtime.onMessage.addListener((msg, sender) => {
+    // Only accept messages from this extension's own background script.
+    if (sender.id !== chrome.runtime.id) return;
     if (msg.type !== 'TOGGLE') return;
 
     if (!hostEl) {
