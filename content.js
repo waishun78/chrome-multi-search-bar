@@ -220,15 +220,20 @@
 
     /* ── Per-bar navigation ── */
     .msb-nav {
-      display: none;
+      /* Always in layout — fixed width so the input never jumps */
+      display: flex;
       align-items: center;
       gap: 1px;
       flex-shrink: 0;
+      width: 68px;
+      visibility: hidden;
+      opacity: 0;
+      transition: opacity 0.15s ease;
     }
 
     .msb-nav.visible {
-      display: flex;
-      animation: msb-row-in 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+      visibility: visible;
+      opacity: 1;
     }
 
     .msb-nav-btn {
@@ -255,11 +260,13 @@
     .msb-count {
       font-size: 11px;
       color: rgba(55, 53, 47, 0.45);
-      min-width: 30px;
+      width: 30px;        /* fixed — prevents buttons shifting on count change */
       text-align: center;
       font-variant-numeric: tabular-nums;
       letter-spacing: -0.01em;
       user-select: none;
+      overflow: hidden;
+      white-space: nowrap;
     }
 
     /* ── Remove button ── */
@@ -431,13 +438,36 @@
 
   function runSearch() {
     clearHighlights();
+
+    // Track which bar's input is focused so we scroll to its first match
+    const focusedInput = shadow?.querySelector('.msb-input:focus');
+    const focusedBarId = focusedInput
+      ? Number(focusedInput.closest('.msb-row')?.dataset.barId)
+      : null;
+
+    let scrollTarget = null;
+
     bars.forEach((bar, idx) => {
       bar.matchIndex = 0;
       const inputEl = shadow?.querySelector(`[data-bar-id="${bar.id}"] .msb-input`);
       const ok = highlightBar(bar, colorForIndex(idx));
       if (inputEl) inputEl.classList.toggle('input-error', !ok);
       updateCounter(bar);
+
+      if (bar.pattern) {
+        const marks = getMarksForBar(bar.id);
+        if (marks.length > 0) {
+          // Prefer the focused bar; fall back to first bar with matches
+          if (scrollTarget === null || bar.id === focusedBarId) {
+            scrollTarget = marks[0];
+          }
+        }
+      }
     });
+
+    if (scrollTarget) {
+      scrollTarget.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
   }
 
   function scheduleSearch() {
