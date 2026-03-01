@@ -2,7 +2,7 @@
   'use strict';
 
   // ── State ──────────────────────────────────────────────────────────────────
-  let bars = [{ id: 0, pattern: '', isRegex: false, isCaseSensitive: false }];
+  let bars = [{ id: 0, pattern: '', isRegex: false, isCaseSensitive: false, matchIndex: 0 }];
   let nextId = 1;
   const COLORS = [
     '#FFEB3B', '#67e8f9', '#86efac', '#f9a8d4',
@@ -31,7 +31,7 @@
       top: 56px;
       right: 16px;
       z-index: 2147483647;
-      width: 300px;
+      width: 320px;
       background: #ffffff;
       border-radius: 6px;
       border: 1px solid rgba(55, 53, 47, 0.14);
@@ -107,16 +107,8 @@
       color: rgb(55, 53, 47);
     }
 
-    #msb-add-btn {
-      font-size: 20px;
-      line-height: 1;
-      padding-bottom: 1px;
-    }
-
-    #msb-close {
-      font-size: 18px;
-      line-height: 1;
-    }
+    #msb-add-btn { font-size: 20px; line-height: 1; padding-bottom: 1px; }
+    #msb-close   { font-size: 18px; line-height: 1; }
 
     /* ── Bars ── */
     #msb-bars {
@@ -128,10 +120,7 @@
       overflow-y: auto;
     }
 
-    #msb-bars::-webkit-scrollbar {
-      width: 3px;
-    }
-
+    #msb-bars::-webkit-scrollbar { width: 3px; }
     #msb-bars::-webkit-scrollbar-thumb {
       background: rgba(55, 53, 47, 0.12);
       border-radius: 2px;
@@ -177,9 +166,7 @@
       transition: border-color 0.15s ease, box-shadow 0.15s ease;
     }
 
-    .msb-input::placeholder {
-      color: rgba(55, 53, 47, 0.28);
-    }
+    .msb-input::placeholder { color: rgba(55, 53, 47, 0.28); }
 
     .msb-input:focus {
       border-color: rgba(35, 131, 226, 0.6);
@@ -191,7 +178,7 @@
       box-shadow: 0 0 0 2px rgba(235, 87, 87, 0.15);
     }
 
-    /* shared pill-button style for regex + case toggles */
+    /* shared pill-button style */
     .msb-toggle-btn {
       flex-shrink: 0;
       display: flex;
@@ -231,6 +218,51 @@
       letter-spacing: -0.01em;
     }
 
+    /* ── Per-bar navigation ── */
+    .msb-nav {
+      display: none;
+      align-items: center;
+      gap: 1px;
+      flex-shrink: 0;
+    }
+
+    .msb-nav.visible {
+      display: flex;
+      animation: msb-row-in 0.12s cubic-bezier(0.16, 1, 0.3, 1) both;
+    }
+
+    .msb-nav-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      height: 18px;
+      padding: 0;
+      border: none;
+      background: none;
+      cursor: pointer;
+      color: rgba(55, 53, 47, 0.38);
+      font-size: 10px;
+      border-radius: 3px;
+      transition: background 0.1s, color 0.1s;
+    }
+
+    .msb-nav-btn:hover {
+      background: rgba(55, 53, 47, 0.08);
+      color: rgb(55, 53, 47);
+    }
+
+    .msb-count {
+      font-size: 11px;
+      color: rgba(55, 53, 47, 0.45);
+      min-width: 30px;
+      text-align: center;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: -0.01em;
+      user-select: none;
+    }
+
+    /* ── Remove button ── */
     .msb-remove-btn {
       flex-shrink: 0;
       display: flex;
@@ -261,6 +293,10 @@
 
   function colorForIndex(idx) {
     return COLORS[idx % COLORS.length];
+  }
+
+  function getMarksForBar(barId) {
+    return Array.from(document.querySelectorAll(`mark[data-msb="${barId}"]`));
   }
 
   // ── Highlight engine ───────────────────────────────────────────────────────
@@ -323,7 +359,7 @@
           parts.push(document.createTextNode(text.slice(lastIndex, match.index)));
         }
         const mark = document.createElement('mark');
-        mark.setAttribute('data-msb', '');
+        mark.setAttribute('data-msb', bar.id); // tag with bar id for per-bar counting
         mark.style.background = color;
         mark.style.color = 'rgba(55,53,47,0.9)';
         mark.style.borderRadius = '2px';
@@ -348,12 +384,59 @@
     return true;
   }
 
+  // ── Counter + navigation ───────────────────────────────────────────────────
+  function updateCounter(bar) {
+    const marks = getMarksForBar(bar.id);
+    const total = marks.length;
+    const row = shadow?.querySelector(`[data-bar-id="${bar.id}"]`);
+    if (!row) return;
+
+    const nav = row.querySelector('.msb-nav');
+    const countEl = row.querySelector('.msb-count');
+
+    // Clear current-mark styling from all marks for this bar
+    marks.forEach((m) => m.removeAttribute('data-msb-current'));
+
+    if (!bar.pattern || total === 0) {
+      nav.classList.remove('visible');
+      return;
+    }
+
+    bar.matchIndex = Math.min(bar.matchIndex, total - 1);
+    countEl.textContent = `${bar.matchIndex + 1}/${total}`;
+    nav.classList.add('visible');
+
+    // Style the active match
+    marks[bar.matchIndex].setAttribute('data-msb-current', '');
+  }
+
+  function navigateBar(bar, direction) {
+    const marks = getMarksForBar(bar.id);
+    if (!marks.length) return;
+
+    // Remove old current
+    marks[bar.matchIndex]?.removeAttribute('data-msb-current');
+
+    bar.matchIndex = (bar.matchIndex + direction + marks.length) % marks.length;
+
+    // Apply new current
+    marks[bar.matchIndex].setAttribute('data-msb-current', '');
+
+    // Update counter text
+    const row = shadow?.querySelector(`[data-bar-id="${bar.id}"]`);
+    if (row) row.querySelector('.msb-count').textContent = `${bar.matchIndex + 1}/${marks.length}`;
+
+    marks[bar.matchIndex].scrollIntoView({ block: 'center', behavior: 'smooth' });
+  }
+
   function runSearch() {
     clearHighlights();
     bars.forEach((bar, idx) => {
+      bar.matchIndex = 0;
       const inputEl = shadow?.querySelector(`[data-bar-id="${bar.id}"] .msb-input`);
       const ok = highlightBar(bar, colorForIndex(idx));
       if (inputEl) inputEl.classList.toggle('input-error', !ok);
+      updateCounter(bar);
     });
   }
 
@@ -372,10 +455,12 @@
       row.className = 'msb-row' + (bar.id === newBarId ? ' msb-row-new' : '');
       row.dataset.barId = bar.id;
 
+      // Dot
       const dot = document.createElement('span');
       dot.className = 'msb-dot';
       dot.style.background = color;
 
+      // Input
       const input = document.createElement('input');
       input.type = 'text';
       input.id = `msb-input-${bar.id}`;
@@ -386,9 +471,11 @@
       input.value = bar.pattern;
       input.addEventListener('input', (e) => {
         bar.pattern = e.target.value;
+        bar.matchIndex = 0;
         scheduleSearch();
       });
 
+      // Regex toggle
       const regexBtn = document.createElement('button');
       regexBtn.className = 'msb-toggle-btn msb-regex-btn' + (bar.isRegex ? ' active' : '');
       regexBtn.title = 'Toggle regex mode';
@@ -399,6 +486,7 @@
         runSearch();
       });
 
+      // Case toggle
       const caseBtn = document.createElement('button');
       caseBtn.className = 'msb-toggle-btn msb-case-btn' + (bar.isCaseSensitive ? ' active' : '');
       caseBtn.title = 'Toggle case sensitive';
@@ -409,6 +497,30 @@
         runSearch();
       });
 
+      // Navigation group: ▲ N/total ▼
+      const nav = document.createElement('div');
+      nav.className = 'msb-nav';
+
+      const prevBtn = document.createElement('button');
+      prevBtn.className = 'msb-nav-btn';
+      prevBtn.title = 'Previous match (Shift+Enter)';
+      prevBtn.textContent = '↑';
+      prevBtn.addEventListener('click', () => navigateBar(bar, -1));
+
+      const countEl = document.createElement('span');
+      countEl.className = 'msb-count';
+
+      const nextBtn = document.createElement('button');
+      nextBtn.className = 'msb-nav-btn';
+      nextBtn.title = 'Next match (Enter)';
+      nextBtn.textContent = '↓';
+      nextBtn.addEventListener('click', () => navigateBar(bar, 1));
+
+      nav.appendChild(prevBtn);
+      nav.appendChild(countEl);
+      nav.appendChild(nextBtn);
+
+      // Remove button
       const removeBtn = document.createElement('button');
       removeBtn.className = 'msb-remove-btn';
       removeBtn.title = 'Remove';
@@ -425,6 +537,7 @@
       row.appendChild(input);
       row.appendChild(regexBtn);
       row.appendChild(caseBtn);
+      row.appendChild(nav);
       row.appendChild(removeBtn);
       barsContainer.appendChild(row);
     });
@@ -435,6 +548,14 @@
     hostEl = document.createElement('div');
     hostEl.setAttribute('data-msb-host', '');
     document.body.appendChild(hostEl);
+
+    // Style for active mark highlight — marks live in the main doc, not shadow DOM
+    const markStyle = document.createElement('style');
+    markStyle.id = 'msb-mark-style';
+    markStyle.textContent =
+      'mark[data-msb-current]{outline:2.5px solid rgba(0,0,0,0.4)!important;' +
+      'outline-offset:1px;border-radius:2px;position:relative;z-index:1}';
+    document.head.appendChild(markStyle);
 
     shadow = hostEl.attachShadow({ mode: 'open' });
 
@@ -463,7 +584,7 @@
     addBtn.textContent = '+';
     addBtn.addEventListener('click', () => {
       const id = nextId++;
-      bars.push({ id, pattern: '', isRegex: false, isCaseSensitive: false });
+      bars.push({ id, pattern: '', isRegex: false, isCaseSensitive: false, matchIndex: 0 });
       renderBars(id);
       const inputs = shadow.querySelectorAll('.msb-input');
       if (inputs.length) inputs[inputs.length - 1].focus();
@@ -482,13 +603,24 @@
     header.appendChild(title);
     header.appendChild(headerActions);
 
-    // Bars
     barsContainer = document.createElement('div');
     barsContainer.id = 'msb-bars';
 
     panel.appendChild(header);
     panel.appendChild(barsContainer);
     shadow.appendChild(panel);
+
+    // Enter / Shift+Enter to navigate within the focused bar
+    shadow.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const row = e.target.closest('.msb-row');
+      if (!row) return;
+      const barId = Number(row.dataset.barId);
+      const bar = bars.find((b) => b.id === barId);
+      if (!bar) return;
+      e.preventDefault();
+      navigateBar(bar, e.shiftKey ? -1 : 1);
+    });
 
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && panel && !panel.classList.contains('msb-hidden')) {
@@ -501,6 +633,7 @@
 
   function openPanel() {
     panel.classList.remove('msb-hidden');
+    runSearch(); // restore highlights cleared on close
     const firstInput = shadow.querySelector('.msb-input');
     if (firstInput) firstInput.focus();
   }
