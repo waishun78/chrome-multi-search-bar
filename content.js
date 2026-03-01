@@ -222,14 +222,14 @@
     .msb-nav {
       /*
        * Always in layout with a fixed width so the input never shifts.
-       * Max count string is "99+/100+" (8 chars @ ~5.5px each ≈ 44px)
-       * plus two 16px buttons = 76px total. No gap — flush layout.
+       * Max count string is "99+/100+" (8 chars @ ~6.5px each ≈ 52px)
+       * plus two 16px buttons = 84px total. No gap — flush layout.
        */
       display: flex;
       align-items: center;
       gap: 0;
       flex-shrink: 0;
-      width: 76px;
+      width: 84px;
       visibility: hidden;
       opacity: 0;
       transition: opacity 0.15s ease;
@@ -264,12 +264,11 @@
 
     .msb-count {
       /* Fixed width sized to the longest possible string: "99+/100+" */
-      width: 44px;
+      width: 52px;
       font-size: 10.5px;
       color: rgba(55, 53, 47, 0.45);
       text-align: center;
       font-variant-numeric: tabular-nums;
-      letter-spacing: -0.02em;
       user-select: none;
       overflow: hidden;
       white-space: nowrap;
@@ -409,20 +408,18 @@
     return n > COUNT_CAP ? '100+' : String(n);
   }
 
-  function selectMark(mark) {
-    try {
-      const range = document.createRange();
-      range.selectNodeContents(mark);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-    } catch (_) {}
-  }
-
-  function activateMark(mark) {
+  function activateMark(mark, select = false) {
     mark.setAttribute('data-msb-current', '');
     mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    selectMark(mark);
+    if (select) {
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(mark);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      } catch (_) {}
+    }
   }
 
   function updateCounter(bar) {
@@ -445,7 +442,7 @@
     countEl.textContent = `${fmtCount(bar.matchIndex + 1)}/${fmtTotal(total)}`;
     nav.classList.add('visible');
 
-    activateMark(marks[bar.matchIndex]);
+    activateMark(marks[bar.matchIndex]); // scroll only, no selection while typing
   }
 
   function navigateBar(bar, direction) {
@@ -462,7 +459,7 @@
         `${fmtCount(bar.matchIndex + 1)}/${fmtTotal(marks.length)}`;
     }
 
-    activateMark(marks[bar.matchIndex]);
+    activateMark(marks[bar.matchIndex], true); // scroll + select on explicit navigation
   }
 
   function runSearch() {
