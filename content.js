@@ -299,8 +299,9 @@
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
-  function colorForIndex(idx) {
-    return COLORS[idx % COLORS.length];
+  // Color keyed on bar.id so removing a bar never shifts other bars' colors
+  function colorForBar(bar) {
+    return COLORS[bar.id % COLORS.length];
   }
 
   function getMarksForBar(barId) {
@@ -471,10 +472,10 @@
   function runSearch() {
     clearHighlights();
 
-    bars.forEach((bar, idx) => {
+    bars.forEach((bar) => {
       bar.matchIndex = 0;
       const inputEl = shadow?.querySelector(`[data-bar-id="${bar.id}"] .msb-input`);
-      const ok = highlightBar(bar, colorForIndex(idx));
+      const ok = highlightBar(bar, colorForBar(bar));
       if (inputEl) inputEl.classList.toggle('input-error', !ok);
       updateCounter(bar);
 
@@ -487,101 +488,111 @@
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
-  function renderBars(newBarId = null) {
-    barsContainer.innerHTML = '';
 
-    bars.forEach((bar, idx) => {
-      const color = colorForIndex(idx);
-      const row = document.createElement('div');
-      row.className = 'msb-row' + (bar.id === newBarId ? ' msb-row-new' : '');
-      row.dataset.barId = bar.id;
-
-      // Dot
-      const dot = document.createElement('span');
-      dot.className = 'msb-dot';
-      dot.style.background = color;
-
-      // Input
-      const input = document.createElement('input');
-      input.type = 'text';
-      input.id = `msb-input-${bar.id}`;
-      input.name = `msb-input-${bar.id}`;
-      input.autocomplete = 'off';
-      input.className = 'msb-input';
-      input.placeholder = 'Search…';
-      input.value = bar.pattern;
-      input.addEventListener('input', (e) => {
-        bar.pattern = e.target.value;
-        bar.matchIndex = 0;
-        scheduleSearch();
-      });
-
-      // Regex toggle
-      const regexBtn = document.createElement('button');
-      regexBtn.className = 'msb-toggle-btn msb-regex-btn' + (bar.isRegex ? ' active' : '');
-      regexBtn.title = 'Toggle regex mode';
-      regexBtn.textContent = '.*';
-      regexBtn.addEventListener('click', () => {
-        bar.isRegex = !bar.isRegex;
-        regexBtn.classList.toggle('active', bar.isRegex);
-        runSearch();
-      });
-
-      // Case toggle
-      const caseBtn = document.createElement('button');
-      caseBtn.className = 'msb-toggle-btn msb-case-btn' + (bar.isCaseSensitive ? ' active' : '');
-      caseBtn.title = 'Toggle case sensitive';
-      caseBtn.textContent = 'Aa';
-      caseBtn.addEventListener('click', () => {
-        bar.isCaseSensitive = !bar.isCaseSensitive;
-        caseBtn.classList.toggle('active', bar.isCaseSensitive);
-        runSearch();
-      });
-
-      // Navigation group: ▲ N/total ▼
-      const nav = document.createElement('div');
-      nav.className = 'msb-nav';
-
-      const prevBtn = document.createElement('button');
-      prevBtn.className = 'msb-nav-btn';
-      prevBtn.title = 'Previous match (Shift+Enter)';
-      prevBtn.textContent = '↑';
-      prevBtn.addEventListener('click', () => navigateBar(bar, -1));
-
-      const countEl = document.createElement('span');
-      countEl.className = 'msb-count';
-
-      const nextBtn = document.createElement('button');
-      nextBtn.className = 'msb-nav-btn';
-      nextBtn.title = 'Next match (Enter)';
-      nextBtn.textContent = '↓';
-      nextBtn.addEventListener('click', () => navigateBar(bar, 1));
-
-      nav.appendChild(prevBtn);
-      nav.appendChild(countEl);
-      nav.appendChild(nextBtn);
-
-      // Remove button
-      const removeBtn = document.createElement('button');
-      removeBtn.className = 'msb-remove-btn';
-      removeBtn.title = 'Remove';
-      removeBtn.textContent = '×';
-      removeBtn.style.visibility = bars.length === 1 ? 'hidden' : 'visible';
-      removeBtn.addEventListener('click', () => {
-        const i = bars.findIndex((b) => b.id === bar.id);
-        if (i !== -1) bars.splice(i, 1);
-        renderBars();
-        runSearch();
-      });
-
-      row.appendChild(dot);
-      row.appendChild(input);
-      row.appendChild(regexBtn);
-      row.appendChild(caseBtn);
-      row.appendChild(nav);
-      row.appendChild(removeBtn);
-      barsContainer.appendChild(row);
+  // Show/hide every remove button based on current bar count.
+  // Called after any add or remove — touches only the visibility property.
+  function syncRemoveBtns() {
+    const hide = bars.length === 1;
+    shadow.querySelectorAll('.msb-remove-btn').forEach((btn) => {
+      btn.style.visibility = hide ? 'hidden' : 'visible';
     });
+  }
+
+  // Build and return a single row element for `bar`.
+  // Pass animate=true only for newly added bars so existing rows are untouched.
+  function createRow(bar, animate = false) {
+    const color = colorForBar(bar);
+
+    const row = document.createElement('div');
+    row.className = 'msb-row' + (animate ? ' msb-row-new' : '');
+    row.dataset.barId = bar.id;
+
+    const dot = document.createElement('span');
+    dot.className = 'msb-dot';
+    dot.style.background = color;
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.id = `msb-input-${bar.id}`;
+    input.name = `msb-input-${bar.id}`;
+    input.autocomplete = 'off';
+    input.className = 'msb-input';
+    input.placeholder = 'Search…';
+    input.value = bar.pattern;
+    input.addEventListener('input', (e) => {
+      bar.pattern = e.target.value;
+      bar.matchIndex = 0;
+      scheduleSearch();
+    });
+
+    const regexBtn = document.createElement('button');
+    regexBtn.className = 'msb-toggle-btn msb-regex-btn' + (bar.isRegex ? ' active' : '');
+    regexBtn.title = 'Toggle regex mode';
+    regexBtn.textContent = '.*';
+    regexBtn.addEventListener('click', () => {
+      bar.isRegex = !bar.isRegex;
+      regexBtn.classList.toggle('active', bar.isRegex);
+      runSearch();
+    });
+
+    const caseBtn = document.createElement('button');
+    caseBtn.className = 'msb-toggle-btn msb-case-btn' + (bar.isCaseSensitive ? ' active' : '');
+    caseBtn.title = 'Toggle case sensitive';
+    caseBtn.textContent = 'Aa';
+    caseBtn.addEventListener('click', () => {
+      bar.isCaseSensitive = !bar.isCaseSensitive;
+      caseBtn.classList.toggle('active', bar.isCaseSensitive);
+      runSearch();
+    });
+
+    const nav = document.createElement('div');
+    nav.className = 'msb-nav';
+
+    const prevBtn = document.createElement('button');
+    prevBtn.className = 'msb-nav-btn';
+    prevBtn.title = 'Previous match (Shift+Enter)';
+    prevBtn.textContent = '↑';
+    prevBtn.addEventListener('click', () => navigateBar(bar, -1));
+
+    const countEl = document.createElement('span');
+    countEl.className = 'msb-count';
+
+    const nextBtn = document.createElement('button');
+    nextBtn.className = 'msb-nav-btn';
+    nextBtn.title = 'Next match (Enter)';
+    nextBtn.textContent = '↓';
+    nextBtn.addEventListener('click', () => navigateBar(bar, 1));
+
+    nav.appendChild(prevBtn);
+    nav.appendChild(countEl);
+    nav.appendChild(nextBtn);
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'msb-remove-btn';
+    removeBtn.title = 'Remove';
+    removeBtn.textContent = '×';
+    removeBtn.addEventListener('click', () => {
+      const i = bars.findIndex((b) => b.id === bar.id);
+      if (i !== -1) bars.splice(i, 1);
+      row.remove();          // remove only this row — no full re-render
+      syncRemoveBtns();
+      runSearch();
+    });
+
+    row.appendChild(dot);
+    row.appendChild(input);
+    row.appendChild(regexBtn);
+    row.appendChild(caseBtn);
+    row.appendChild(nav);
+    row.appendChild(removeBtn);
+    return row;
+  }
+
+  // Full render — used only on initial panel creation.
+  function renderBars() {
+    barsContainer.innerHTML = '';
+    bars.forEach((bar) => barsContainer.appendChild(createRow(bar)));
+    syncRemoveBtns();
   }
 
   // ── Panel init ─────────────────────────────────────────────────────────────
@@ -626,10 +637,11 @@
     addBtn.textContent = '+';
     addBtn.addEventListener('click', () => {
       const id = nextId++;
-      bars.push({ id, pattern: '', isRegex: false, isCaseSensitive: false, matchIndex: 0 });
-      renderBars(id);
-      const inputs = shadow.querySelectorAll('.msb-input');
-      if (inputs.length) inputs[inputs.length - 1].focus();
+      const bar = { id, pattern: '', isRegex: false, isCaseSensitive: false, matchIndex: 0 };
+      bars.push(bar);
+      barsContainer.appendChild(createRow(bar, true)); // append only the new row
+      syncRemoveBtns();
+      shadow.getElementById(`msb-input-${id}`)?.focus();
       runSearch();
     });
 
