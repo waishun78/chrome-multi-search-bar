@@ -18,7 +18,7 @@
   // ── Debounce ───────────────────────────────────────────────────────────────
   let debounceTimer = null;
 
-  // ── Styles ─────────────────────────────────────────────────────────────────
+  // ── Styles (Linear-inspired dark UI) ──────────────────────────────────────
   const MSB_CSS = `
     *, *::before, *::after {
       box-sizing: border-box;
@@ -32,17 +32,17 @@
       right: 16px;
       z-index: 2147483647;
       width: 320px;
-      background: #ffffff;
-      border-radius: 6px;
-      border: 1px solid rgba(55, 53, 47, 0.14);
+      background: #1a1a1e;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
       box-shadow:
-        rgba(15, 15, 15, 0.05) 0px 0px 0px 1px,
-        rgba(15, 15, 15, 0.1) 0px 3px 6px,
-        rgba(15, 15, 15, 0.2) 0px 9px 24px;
-      font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont,
+        0 0 0 1px rgba(0, 0, 0, 0.4),
+        0 8px 16px rgba(0, 0, 0, 0.4),
+        0 24px 48px rgba(0, 0, 0, 0.3);
+      font-family: 'Inter', ui-sans-serif, -apple-system, BlinkMacSystemFont,
                    'Segoe UI', Helvetica, Arial, sans-serif;
-      font-size: 14px;
-      color: rgb(55, 53, 47);
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.82);
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -66,17 +66,17 @@
       display: flex;
       align-items: center;
       justify-content: space-between;
-      padding: 8px 8px 8px 12px;
-      border-bottom: 1px solid rgba(55, 53, 47, 0.09);
+      padding: 7px 7px 7px 11px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       flex-shrink: 0;
     }
 
     #msb-title {
       font-size: 11px;
-      font-weight: 600;
-      color: rgba(55, 53, 47, 0.5);
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.3);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.07em;
       user-select: none;
       flex: 1;
     }
@@ -84,7 +84,7 @@
     #msb-header-actions {
       display: flex;
       align-items: center;
-      gap: 2px;
+      gap: 1px;
     }
 
     .msb-icon-btn {
@@ -96,38 +96,38 @@
       border: none;
       background: none;
       cursor: pointer;
-      color: rgba(55, 53, 47, 0.4);
-      border-radius: 4px;
-      transition: background 0.1s, color 0.1s;
+      color: rgba(255, 255, 255, 0.3);
+      border-radius: 5px;
+      transition: background 0.15s, color 0.15s;
       flex-shrink: 0;
     }
 
     .msb-icon-btn:hover {
-      background: rgba(55, 53, 47, 0.08);
-      color: rgb(55, 53, 47);
+      background: rgba(255, 255, 255, 0.07);
+      color: rgba(255, 255, 255, 0.75);
     }
 
-    #msb-add-btn { font-size: 20px; line-height: 1; padding-bottom: 1px; }
-    #msb-close   { font-size: 18px; line-height: 1; }
+    #msb-add-btn { font-size: 19px; line-height: 1; padding-bottom: 1px; }
+    #msb-close   { font-size: 17px; line-height: 1; }
 
     /* ── Bars ── */
     #msb-bars {
       display: flex;
       flex-direction: column;
-      gap: 2px;
-      padding: 6px;
-      max-height: calc(60vh - 52px);
+      gap: 1px;
+      padding: 5px;
+      max-height: calc(60vh - 46px);
       overflow-y: auto;
     }
 
     #msb-bars::-webkit-scrollbar { width: 3px; }
     #msb-bars::-webkit-scrollbar-thumb {
-      background: rgba(55, 53, 47, 0.12);
+      background: rgba(255, 255, 255, 0.08);
       border-radius: 2px;
     }
 
     @keyframes msb-row-in {
-      from { opacity: 0; transform: translateY(-5px); }
+      from { opacity: 0; transform: translateY(-4px); }
       to   { opacity: 1; transform: translateY(0); }
     }
 
@@ -135,20 +135,22 @@
       display: flex;
       align-items: center;
       gap: 4px;
-      padding: 3px 4px;
-      border-radius: 4px;
+      padding: 3px 3px;
+      border-radius: 5px;
     }
+
+    .msb-row:hover { background: rgba(255, 255, 255, 0.03); }
 
     .msb-row.msb-row-new {
       animation: msb-row-in 0.15s cubic-bezier(0.16, 1, 0.3, 1) both;
     }
 
     .msb-dot {
-      width: 7px;
-      height: 7px;
+      width: 6px;
+      height: 6px;
       border-radius: 50%;
       flex-shrink: 0;
-      border: 1.5px solid rgba(0, 0, 0, 0.12);
+      border: 1px solid rgba(0, 0, 0, 0.25);
       transition: background 0.2s ease;
     }
 
@@ -156,75 +158,69 @@
       flex: 1;
       min-width: 0;
       padding: 5px 8px;
-      border: 1px solid rgba(55, 53, 47, 0.16);
-      border-radius: 4px;
-      font-size: 13px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
+      font-size: 12.5px;
       font-family: inherit;
-      color: rgb(55, 53, 47);
-      background: #fff;
+      color: rgba(255, 255, 255, 0.82);
+      background: rgba(255, 255, 255, 0.04);
       outline: none;
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      transition: border-color 0.15s, box-shadow 0.15s;
     }
 
-    .msb-input::placeholder { color: rgba(55, 53, 47, 0.28); }
+    .msb-input::placeholder { color: rgba(255, 255, 255, 0.22); }
 
     .msb-input:focus {
-      border-color: rgba(35, 131, 226, 0.6);
-      box-shadow: 0 0 0 2px rgba(35, 131, 226, 0.18);
+      border-color: rgba(255, 255, 255, 0.18);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.06);
     }
 
     .msb-input.input-error {
-      border-color: rgba(235, 87, 87, 0.7);
-      box-shadow: 0 0 0 2px rgba(235, 87, 87, 0.15);
+      border-color: rgba(248, 81, 73, 0.6);
+      box-shadow: 0 0 0 2px rgba(248, 81, 73, 0.12);
     }
 
-    /* shared pill-button style */
+    /* shared toggle pill — regex + case */
     .msb-toggle-btn {
       flex-shrink: 0;
       display: flex;
       align-items: center;
       justify-content: center;
-      height: 26px;
+      height: 24px;
       padding: 0 5px;
-      border: 1px solid rgba(55, 53, 47, 0.16);
-      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 5px;
       background: none;
-      color: rgba(55, 53, 47, 0.38);
+      color: rgba(255, 255, 255, 0.28);
       cursor: pointer;
-      transition: background 0.1s, border-color 0.1s, color 0.1s;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
       line-height: 1;
     }
 
     .msb-toggle-btn:hover {
-      background: rgba(55, 53, 47, 0.06);
-      border-color: rgba(55, 53, 47, 0.28);
-      color: rgb(55, 53, 47);
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.14);
+      color: rgba(255, 255, 255, 0.65);
     }
 
     .msb-toggle-btn.active {
-      background: rgba(35, 131, 226, 0.1);
-      border-color: rgba(35, 131, 226, 0.45);
-      color: rgb(35, 131, 226);
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.22);
+      color: rgba(255, 255, 255, 0.9);
     }
 
     .msb-regex-btn {
-      font-size: 10.5px;
+      font-size: 10px;
       font-family: 'SFMono-Regular', 'Consolas', 'Liberation Mono', monospace;
     }
 
     .msb-case-btn {
-      font-size: 11px;
+      font-size: 10.5px;
       font-weight: 600;
-      letter-spacing: -0.01em;
     }
 
     /* ── Per-bar navigation ── */
     .msb-nav {
-      /*
-       * Always in layout with a fixed width so the input never shifts.
-       * Max count string is "99+/100+" (8 chars @ ~6.5px each ≈ 52px)
-       * plus two 16px buttons = 84px total. No gap — flush layout.
-       */
       display: flex;
       align-items: center;
       gap: 0;
@@ -250,23 +246,22 @@
       border: none;
       background: none;
       cursor: pointer;
-      color: rgba(55, 53, 47, 0.38);
+      color: rgba(255, 255, 255, 0.25);
       font-size: 9px;
       border-radius: 3px;
-      transition: background 0.1s, color 0.1s;
+      transition: background 0.15s, color 0.15s;
       flex-shrink: 0;
     }
 
     .msb-nav-btn:hover {
-      background: rgba(55, 53, 47, 0.08);
-      color: rgb(55, 53, 47);
+      background: rgba(255, 255, 255, 0.07);
+      color: rgba(255, 255, 255, 0.7);
     }
 
     .msb-count {
-      /* Fixed width sized to the longest possible string: "99+/100+" */
       width: 52px;
       font-size: 10.5px;
-      color: rgba(55, 53, 47, 0.45);
+      color: rgba(255, 255, 255, 0.25);
       text-align: center;
       font-variant-numeric: tabular-nums;
       user-select: none;
@@ -281,21 +276,21 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 22px;
-      height: 22px;
+      width: 20px;
+      height: 20px;
       border: none;
       background: none;
       cursor: pointer;
-      color: rgba(55, 53, 47, 0.25);
-      font-size: 16px;
+      color: rgba(255, 255, 255, 0.18);
+      font-size: 15px;
       line-height: 1;
       border-radius: 4px;
-      transition: background 0.1s, color 0.1s;
+      transition: background 0.15s, color 0.15s;
     }
 
     .msb-remove-btn:hover {
-      background: rgba(235, 87, 87, 0.1);
-      color: rgb(235, 87, 87);
+      background: rgba(248, 81, 73, 0.12);
+      color: rgba(248, 81, 73, 0.85);
     }
   `;
 
@@ -599,8 +594,9 @@
     const markStyle = document.createElement('style');
     markStyle.id = 'msb-mark-style';
     markStyle.textContent =
-      'mark[data-msb-current]{outline:2.5px solid rgba(0,0,0,0.4)!important;' +
-      'outline-offset:1px;border-radius:2px;position:relative;z-index:1}';
+      'mark[data-msb-current]{outline:2px solid rgba(0,0,0,0.55)!important;' +
+      'outline-offset:0px;border-radius:2px;position:relative;z-index:1;' +
+      'filter:brightness(0.82) saturate(1.3)!important}';
     document.head.appendChild(markStyle);
 
     shadow = hostEl.attachShadow({ mode: 'open' });
