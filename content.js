@@ -343,10 +343,21 @@
       NodeFilter.SHOW_TEXT,
       {
         acceptNode(node) {
-          let el = node.parentElement;
+          const parent = node.parentElement;
+
+          // Skip elements hidden via CSS (display:none, visibility:hidden).
+          // checkVisibility() walks the ancestor chain — no reflow, O(depth).
+          if (parent?.checkVisibility &&
+              !parent.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) {
+            return NodeFilter.FILTER_REJECT;
+          }
+
+          let el = parent;
           while (el) {
             if (el === hostEl) return NodeFilter.FILTER_REJECT;
             if (SKIP_TAGS.has(el.tagName)) return NodeFilter.FILTER_REJECT;
+            // Skip aria-hidden subtrees (e.g. Google's hidden synonym overflow)
+            if (el.getAttribute('aria-hidden') === 'true') return NodeFilter.FILTER_REJECT;
             el = el.parentElement;
           }
           return NodeFilter.FILTER_ACCEPT;
