@@ -304,8 +304,9 @@
     return COLORS[bar.id % COLORS.length];
   }
 
+  // Only the first fragment of a cross-inline-element match counts for navigation.
   function getMarksForBar(barId) {
-    return Array.from(document.querySelectorAll(`mark[data-msb="${barId}"]`));
+    return Array.from(document.querySelectorAll(`mark[data-msb="${barId}"]:not([data-msb-cont])`));
   }
 
   // ── Highlight engine ───────────────────────────────────────────────────────
@@ -322,17 +323,64 @@
     'SCRIPT', 'STYLE', 'TEXTAREA', 'INPUT', 'SELECT', 'NOSCRIPT', 'IFRAME',
   ]);
 
-  function highlightBar(bar, color) {
-    if (!bar.pattern) return true;
+  // Block-level elements that form search boundaries — text nodes are grouped
+  // by their nearest block ancestor so patterns can match across inline elements
+  // like <em>, <span>, <strong>, <a> without being split.
+  const BLOCK_TAGS = new Set([
+    'ADDRESS','ARTICLE','ASIDE','BLOCKQUOTE','CANVAS','DD','DIV','DL',
+    'FIELDSET','FIGCAPTION','FIGURE','FOOTER','FORM',
+    'H1','H2','H3','H4','H5','H6',
+    'HEADER','HR','LI','MAIN','NAV','OL','P',
+    'PRE','SECTION','TABLE','TFOOT','THEAD','TBODY','TD','TH','TR',
+    'UL','VIDEO','BODY',
+  ]);
 
-    let re;
-    try {
-      const source = bar.isRegex ? bar.pattern : escapeRegex(bar.pattern);
-      const flags = bar.isCaseSensitive ? 'g' : 'gi';
-      re = new RegExp(source, flags);
-    } catch (_) {
-      return false;
-    }
+  function nearestBlock(el) {
+    let cur = el;
+    while (cur && !BLOCK_TAGS.has(cur.tagName)) cur = cur.parentElement;
+    return cur || document.body;
+  }
+
+  function makeMarkEl(bar, text, isCont) {
+    const mark = document.createElement('mark');
+    mark.setAttribute('data-msb', bar.id);
+    if (isCont) mark.setAttribute('data-msb-cont', '');
+    mark.style.background = colorForBar(bar);
+    mark.style.color = 'rgba(55,53,47,0.9)';
+    mark.style.borderRadius = '2px';
+    mark.style.padding = '0 1px';
+    mark.textContent = text;
+    return mark;
+  }
+
+  // Single coordinated pass:
+  // • Groups text nodes by nearest block ancestor so regexes can match across
+  //   inline elements (e.g. "the <em>NTUC AI Career Coach</em>" is one virtual
+  //   string, not two separate text nodes).
+  // • Runs all bar regexes simultaneously on the virtual string before any DOM
+  //   mutations, so a pattern is never blocked by another bar's <mark>.
+  // • Multi-node matches produce a first <mark> + continuation <mark data-msb-cont>
+  //   fragments; only non-continuation marks count for navigation/counter.
+  function highlightAll() {
+    // Build regex entries for every bar; mark invalid patterns on their inputs.
+    const entries = bars.map((bar) => {
+      const inputEl = shadow?.querySelector(`[data-bar-id="${bar.id}"] .msb-input`);
+      if (!bar.pattern) {
+        inputEl?.classList.remove('input-error');
+        return null;
+      }
+      try {
+        const source = bar.isRegex ? bar.pattern : escapeRegex(bar.pattern);
+        const flags = bar.isCaseSensitive ? 'g' : 'gi';
+        inputEl?.classList.remove('input-error');
+        return { bar, re: new RegExp(source, flags) };
+      } catch (_) {
+        inputEl?.classList.add('input-error');
+        return null;
+      }
+    }).filter(Boolean);
+
+    if (!entries.length) return;
 
     const walker = document.createTreeWalker(
       document.body,
@@ -341,8 +389,7 @@
         acceptNode(node) {
           const parent = node.parentElement;
 
-          // Skip elements hidden via CSS (display:none, visibility:hidden).
-          // checkVisibility() walks the ancestor chain — no reflow, O(depth).
+          // Skip CSS-hidden elements
           if (parent?.checkVisibility &&
               !parent.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true })) {
             return NodeFilter.FILTER_REJECT;
@@ -352,7 +399,6 @@
           while (el) {
             if (el === hostEl) return NodeFilter.FILTER_REJECT;
             if (SKIP_TAGS.has(el.tagName)) return NodeFilter.FILTER_REJECT;
-            // Skip aria-hidden subtrees (e.g. Google's hidden synonym overflow)
             if (el.getAttribute('aria-hidden') === 'true') return NodeFilter.FILTER_REJECT;
             el = el.parentElement;
           }
@@ -361,47 +407,85 @@
       }
     );
 
+    // Collect all text nodes in document order.
     const textNodes = [];
-    let node;
-    while ((node = walker.nextNode())) textNodes.push(node);
+    let n;
+    while ((n = walker.nextNode())) textNodes.push(n);
 
-    textNodes.forEach((textNode) => {
-      const text = textNode.nodeValue;
-      if (!text) return;
-
-      re.lastIndex = 0;
-      let match;
-      const parts = [];
-      let lastIndex = 0;
-
-      while ((match = re.exec(text)) !== null) {
-        if (match.index > lastIndex) {
-          parts.push(document.createTextNode(text.slice(lastIndex, match.index)));
-        }
-        const mark = document.createElement('mark');
-        mark.setAttribute('data-msb', bar.id); // tag with bar id for per-bar counting
-        mark.style.background = color;
-        mark.style.color = 'rgba(55,53,47,0.9)';
-        mark.style.borderRadius = '2px';
-        mark.style.padding = '0 1px';
-        mark.textContent = match[0];
-        parts.push(mark);
-        lastIndex = match.index + match[0].length;
-        if (match[0].length === 0) re.lastIndex++;
-      }
-
-      if (!parts.length) return;
-
-      if (lastIndex < text.length) {
-        parts.push(document.createTextNode(text.slice(lastIndex)));
-      }
-
-      const frag = document.createDocumentFragment();
-      parts.forEach((p) => frag.appendChild(p));
-      textNode.parentNode.replaceChild(frag, textNode);
+    // Group by nearest block ancestor (order within each group is document order).
+    const groups = new Map();
+    textNodes.forEach((node) => {
+      const block = nearestBlock(node.parentElement);
+      if (!groups.has(block)) groups.set(block, []);
+      groups.get(block).push(node);
     });
 
-    return true;
+    groups.forEach((nodes) => {
+      // Build virtual concatenated string and a segment map for position lookups.
+      const segments = [];
+      let virtualStr = '';
+      nodes.forEach((node) => {
+        segments.push({ node, start: virtualStr.length, end: virtualStr.length + node.nodeValue.length });
+        virtualStr += node.nodeValue;
+      });
+
+      // Find all matches from all bars against the virtual string.
+      const allMatches = [];
+      entries.forEach(({ bar, re }) => {
+        re.lastIndex = 0;
+        let m;
+        while ((m = re.exec(virtualStr)) !== null) {
+          allMatches.push({ start: m.index, end: m.index + m[0].length, bar });
+          if (m[0].length === 0) re.lastIndex++;
+        }
+      });
+
+      if (!allMatches.length) return;
+
+      // Sort and resolve overlaps (earlier start wins; ties go to earlier bar).
+      allMatches.sort((a, b) => a.start - b.start || bars.indexOf(a.bar) - bars.indexOf(b.bar));
+      const kept = [];
+      let cursor = 0;
+      for (const m of allMatches) {
+        if (m.start >= cursor) { kept.push(m); cursor = m.end; }
+      }
+
+      // Map each kept match back to per-text-node intervals.
+      const nodeIntervals = new Map(nodes.map((node) => [node, []]));
+      kept.forEach(({ start, end, bar }) => {
+        let isFirst = true;
+        segments.forEach(({ node, start: segStart, end: segEnd }) => {
+          const oStart = Math.max(start, segStart);
+          const oEnd   = Math.min(end, segEnd);
+          if (oStart >= oEnd) return;
+          nodeIntervals.get(node).push({
+            start: oStart - segStart,
+            end:   oEnd   - segStart,
+            bar,
+            isCont: !isFirst,
+          });
+          isFirst = false;
+        });
+      });
+
+      // Apply intervals to each text node (replace with fragment).
+      nodes.forEach((node) => {
+        const intervals = nodeIntervals.get(node);
+        if (!intervals.length) return;
+        intervals.sort((a, b) => a.start - b.start);
+
+        const text = node.nodeValue;
+        const frag = document.createDocumentFragment();
+        let pos = 0;
+        intervals.forEach(({ start, end, bar, isCont }) => {
+          if (start > pos) frag.appendChild(document.createTextNode(text.slice(pos, start)));
+          frag.appendChild(makeMarkEl(bar, text.slice(start, end), isCont));
+          pos = end;
+        });
+        if (pos < text.length) frag.appendChild(document.createTextNode(text.slice(pos)));
+        node.parentNode.replaceChild(frag, node);
+      });
+    });
   }
 
   // ── Counter + navigation ───────────────────────────────────────────────────
@@ -471,15 +555,9 @@
 
   function runSearch() {
     clearHighlights();
-
-    bars.forEach((bar) => {
-      bar.matchIndex = 0;
-      const inputEl = shadow?.querySelector(`[data-bar-id="${bar.id}"] .msb-input`);
-      const ok = highlightBar(bar, colorForBar(bar));
-      if (inputEl) inputEl.classList.toggle('input-error', !ok);
-      updateCounter(bar);
-
-    });
+    bars.forEach((bar) => { bar.matchIndex = 0; });
+    highlightAll();
+    bars.forEach((bar) => updateCounter(bar));
   }
 
   function scheduleSearch() {
