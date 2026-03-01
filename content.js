@@ -742,6 +742,11 @@
     panel.appendChild(barsContainer);
     shadow.appendChild(panel);
 
+    // Stop all keystrokes inside the panel from leaking to page-level shortcuts
+    // (e.g. sites that bind "/" or "f" on document). Events still propagate
+    // normally within the shadow DOM so Enter navigation below still works.
+    shadow.addEventListener('keydown', (e) => e.stopPropagation());
+
     // Enter / Shift+Enter to navigate within the focused bar
     shadow.addEventListener('keydown', (e) => {
       if (e.key !== 'Enter') return;
