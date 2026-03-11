@@ -380,7 +380,7 @@
     // Build regex entries for every bar; mark invalid patterns on their inputs.
     const entries = bars.map((bar) => {
       const inputEl = shadow?.querySelector(`[data-bar-id="${bar.id}"] .msb-input`);
-      if (!bar.pattern) {
+      if (!bar.pattern || bar.pattern.length < MIN_QUERY_LENGTH) {
         inputEl?.classList.remove('input-error');
         return null;
       }
@@ -440,7 +440,12 @@
       groups.get(block).push(node);
     });
 
+    let totalMatches = 0; // running total across all groups for the global cap
+
     groups.forEach((nodes) => {
+      // Bail out early once the global cap is reached to avoid further DOM work.
+      if (totalMatches >= MAX_MATCHES_TOTAL) return;
+
       // Build virtual string with O(n) join rather than O(n²) concatenation.
       const segments = [];
       let offset = 0;
@@ -451,17 +456,18 @@
       });
       const virtualStr = nodes.map((n) => n.nodeValue).join('');
 
-      // Collect matches from all bars; cap total to bound memory and limit how
-      // long a catastrophic regex (e.g. (a+)+) can monopolise the main thread.
+      // Collect matches from all bars; cap per group AND globally so a single
+      // broad pattern on a huge page cannot freeze the main thread.
       const allMatches = [];
+      const groupBudget = Math.min(MAX_MATCHES_PER_GROUP, MAX_MATCHES_TOTAL - totalMatches);
       for (const { bar, re } of entries) {
-        if (allMatches.length >= MAX_MATCHES_PER_GROUP) break;
+        if (allMatches.length >= groupBudget) break;
         re.lastIndex = 0;
         let m;
         while ((m = re.exec(virtualStr)) !== null) {
           allMatches.push({ start: m.index, end: m.index + m[0].length, bar });
           if (m[0].length === 0) re.lastIndex++;
-          if (allMatches.length >= MAX_MATCHES_PER_GROUP) break;
+          if (allMatches.length >= groupBudget) break;
         }
       }
 
@@ -474,6 +480,7 @@
       for (const m of allMatches) {
         if (m.start >= cursor) { kept.push(m); cursor = m.end; }
       }
+      totalMatches += kept.length;
 
       // Map matches to per-text-node intervals using a two-pointer scan.
       // Both kept[] and segments[] are sorted by start; matches don't overlap,
@@ -523,10 +530,17 @@
 
   // ── Counter + navigation ───────────────────────────────────────────────────
   const COUNT_CAP = 99;
-  // Cap total regex matches collected per block group. Broad patterns like \w+
-  // on a very large page can produce tens of thousands of matches; this bounds
-  // memory use and limits how long a poorly-written regex can run.
-  const MAX_MATCHES_PER_GROUP = 5000;
+  // Minimum pattern length before a search is attempted.
+  // Single-character (and very short) patterns can match thousands of times on
+  // large pages, freezing the main thread. Two characters is the practical
+  // minimum for a meaningful search.
+  const MIN_QUERY_LENGTH = 2;
+  // Cap matches per block group — prevents a single giant <div> from dominating.
+  const MAX_MATCHES_PER_GROUP = 500;
+  // Hard ceiling across *all* groups combined.  Even with MAX_MATCHES_PER_GROUP
+  // in place a page with hundreds of groups could accumulate far more matches;
+  // this keeps total DOM mutations bounded regardless of page size.
+  const MAX_MATCHES_TOTAL = 5_000;
 
   function fmtCount(n) {
     return n > COUNT_CAP ? `${COUNT_CAP}+` : String(n);
@@ -599,7 +613,14 @@
 
   function scheduleSearch() {
     clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(runSearch, 150);
+    // Use a longer delay for short patterns — they match far more nodes and are
+    // the primary cause of janky typing on content-heavy pages.
+    const shortest = bars.reduce(
+      (min, b) => (b.pattern.length >= MIN_QUERY_LENGTH ? Math.min(min, b.pattern.length) : min),
+      Infinity,
+    );
+    const delay = shortest <= 2 ? 350 : shortest <= 3 ? 200 : 150;
+    debounceTimer = setTimeout(runSearch, isFinite(shortest) ? delay : 150);
   }
 
   // ── Render ─────────────────────────────────────────────────────────────────
